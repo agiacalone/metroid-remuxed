@@ -1,0 +1,9 @@
+# Nothing from Metrandomizer is committed: setup unpacks it into $MR_HOME.
+*.exe
+*.zip
+*.pyc
+*_extracted/
+pyinstxtractor.py
+# No ROMs, no generated seeds.
+*.nes
+out/

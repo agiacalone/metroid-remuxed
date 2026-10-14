@@ -1,0 +1,11 @@
+{
+  "No Powerup Delay": true,
+  "Ice Overrides Wave": true,
+  "Game Boy Style Reset": true,
+  "Map Complexity": "Very Low",
+  "Starting Health": "99",
+  "Recovery Multiplier": "10x",
+  "Damage Multiplier": "0.5x",
+  "Randomize Palettes": false,
+  "Minimalist Status Bar": false
+}

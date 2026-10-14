@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# metroid-rando: run the Metrandomizer NES Metroid randomizer headless on Linux.
+#
+# Metrandomizer is a Windows program: Python 3.7 code packed into one .exe by
+# PyInstaller, with a Tkinter GUI. Its generator is plain Python, so this script
+# unpacks the bundled modules once and runs them in a python:3.7 container,
+# calling the generator directly. No Wine, no GUI. See README.md.
+set -euo pipefail
+
+VERSION=v07b
+# romhacking.net blocks scripted downloads, so the zip is fetched by hand:
+# https://www.romhacking.net/utilities/1437/
+ZIP_NAME="Metrandomizer ${VERSION}.zip"
+ZIP_SHA256=ca29f36ceab41f0ade65dcd1c0ab14b412489edb3daa08812f493577cb069821
+# PyInstaller extractor, pinned to a commit and checked. GPL-3, so fetched, never committed.
+EXTRACTOR_URL=https://raw.githubusercontent.com/extremecoders-re/pyinstxtractor/815d31cf26bc71e62f851b2e549452e7b7c9dd98/pyinstxtractor.py
+EXTRACTOR_SHA256=94e0b6c9d5151bbeefc7e7452e96e24b396c2dbfcb0348e5f12c4c0865fefe58
+# The exe was built with Python 3.7; its bytecode only loads in 3.7.
+PY_IMAGE=python@sha256:b53f496ca43e5af6994f8e316cf03af31050bf7944e0e4a308ad86c001cf028b
+# SHA-1 of the PRG+CHR data (after the 16-byte header) of Metroid (USA).
+ROM_SHA1=fdbfc7871962f72a1ef57e5a7e456164fb93430b
+
+REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+MR_HOME=${MR_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/metrandomizer}
+MR_ROM=${MR_ROM:-}
+VENDOR=$MR_HOME/vendor
+
+die() { echo "metroid-rando: $*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+usage: metroid-rando COMMAND [ARGS]
+
+  setup ZIP                 verify "$ZIP_NAME" (downloaded by hand from
+                            romhacking.net/utilities/1437) and unpack it
+  options                   list every setting and its allowed values
+  gen [OPTIONS]             generate one seed
+
+gen options:
+  --preset NAME             use presets/NAME.json from the repo
+  --settings FILE           a settings.json (from a preset or beside an earlier seed)
+  --seed SEED               seed number (default: random)
+  --out DIR                 output directory (default: ./out); the seed gets its own folder
+  --name NAME               ROM file name without .nes (default: metroid-SEED)
+  --rom FILE                unmodified "Metroid (USA).nes" (or set MR_ROM)
+  -v                        show the container command
+
+environment: MR_HOME (default ~/.local/share/metrandomizer), MR_ROM
+EOF
+}
+
+sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
+
+py() {   # py DIR:MOUNT... -- ARGS   run python 3.7 offline as the calling user
+    local mounts=()
+    while [[ $1 != -- ]]; do mounts+=(-v "$1"); shift; done; shift
+    docker run --rm --network none -u "$(id -u):$(id -g)" -w /w "${mounts[@]}" "$PY_IMAGE" python -I "$@"
+}
+
+cmd_setup() {
+    local zip=${1:-}
+    [[ -f $zip ]] || die "setup needs the downloaded zip: metroid-rando setup \"$ZIP_NAME\""
+    [[ $(sha256_of "$zip") == "$ZIP_SHA256" ]] || die "$zip is not $ZIP_NAME (SHA-256 mismatch)"
+    command -v unzip >/dev/null || die "unzip is required"
+    docker pull -q "$PY_IMAGE" >/dev/null
+
+    local tmp; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+    unzip -q "$zip" -d "$tmp/zip"
+    local app="$tmp/zip/Metrandomizer $VERSION"
+    [[ -f $app/Metrandomizer.exe ]] || die "unexpected zip layout"
+
+    curl -fsSL "$EXTRACTOR_URL" -o "$tmp/pyinstxtractor.py"
+    [[ $(sha256_of "$tmp/pyinstxtractor.py") == "$EXTRACTOR_SHA256" ]] || die "pyinstxtractor checksum mismatch"
+
+    mkdir -p "$tmp/work" && cp "$app/Metrandomizer.exe" "$tmp/work/M.exe"
+    py "$tmp/pyinstxtractor.py:/t/x.py:ro" "$tmp/work:/w" -- /t/x.py /w/M.exe >/dev/null \
+        || die "extraction failed"
+
+    rm -rf "$VENDOR" && mkdir -p "$VENDOR"
+    # Keep only the app's own modules, the standard library they import, and its data files.
+    cp -r "$tmp/work/M.exe_extracted/." "$VENDOR/"
+    find "$VENDOR" -maxdepth 1 \( -name '*.dll' -o -name '*.pyd' -o -name 'base_library.zip' \) -delete
+    rm -rf "$VENDOR"/tcl* "$VENDOR"/tk* 2>/dev/null || true
+    cp -r "$app/data" "$VENDOR/data"
+    echo "$VERSION" > "$VENDOR/VERSION"
+    echo "metroid-rando: Metrandomizer $VERSION unpacked to $VENDOR"
+}
+
+check_vendor() { [[ -f $VENDOR/VERSION ]] || die "not set up; run: metroid-rando setup \"$ZIP_NAME\""; }
+
+cmd_options() {
+    check_vendor
+    py "$VENDOR:/m:ro" -- -c '
+import os, sys
+sys.path[:0] = [os.path.join("/m", d) for d in os.listdir("/m") if d.endswith("_extracted")] + ["/m"]
+import Metrandomizer as M
+for k, v in M.configBits.items():
+    print(f"{k}: " + (" | ".join(v[2]) if v[0] == "Choice" else "true | false"))
+print("palettes (picked at random when Randomize Palettes is on):", ", ".join(sorted(M.paletteDefs)))
+' 2>&1 | grep -v '^No configuration'
+}
+
+check_rom() {
+    local rom=$1
+    [[ -f $rom ]] || die "ROM not found: $rom (use --rom or MR_ROM)"
+    [[ $(tail -c +17 "$rom" | sha1sum | cut -d' ' -f1) == "$ROM_SHA1" ]] \
+        || die "$rom is not an unmodified Metroid (USA)"
+}
+
+cmd_gen() {
+    check_vendor
+    local settings="" seed="" out=out name="" rom=$MR_ROM verbose=0
+    while (($#)); do
+        case $1 in
+            --preset)   settings=$REPO/presets/$2.json; [[ -f $settings ]] || die "no preset: $2"; shift 2 ;;
+            --settings) settings=$2; shift 2 ;;
+            --seed)     seed=$2; shift 2 ;;
+            --out)      out=$2; shift 2 ;;
+            --name)     name=$2; shift 2 ;;
+            --rom)      rom=$2; shift 2 ;;
+            -v)         verbose=1; shift ;;
+            *)          usage >&2; exit 2 ;;
+        esac
+    done
+    [[ -n $settings && -f $settings ]] || die "need --preset or --settings"
+    check_rom "$rom"
+    # Some seeds cannot fit the generated map ("Bad seed!"). A chosen seed fails
+    # loudly; without --seed, retry with a new one, as the GUI user would.
+    local tries=1; [[ -z $seed ]] && tries=20
+    local fixed_name=$name work rc
+    work=$(mktemp -d); trap 'rm -rf "$work"' RETURN
+    cp "$rom" "$work/base.nes"; cp "$settings" "$work/settings.in.json"
+    for ((attempt = 1; attempt <= tries; attempt++)); do
+        [[ $tries -gt 1 ]] && seed=$(( (RANDOM << 30 | RANDOM << 15 | RANDOM) % 4294967296 ))
+        [[ $seed =~ ^[0-9]+$ ]] || die "seed must be a number"
+        name=${fixed_name:-metroid-$seed}
+        rm -rf "$work/out"; mkdir "$work/out"
+        ((verbose)) && echo "metroid-rando: settings $settings, seed $seed (attempt $attempt)" >&2
+        rc=0
+        py "$VENDOR:/m:ro" "$REPO/driver:/d:ro" "$work:/w" -- \
+            /d/mrcli.py /m /w/settings.in.json /w/base.nes "$seed" /w/out "$name" \
+            > "$work/log" 2>&1 || rc=$?
+        grep -v '^No configuration\|^Generated Spoiler\|^Randomization successful' "$work/log" \
+            | { ((verbose)) && cat >&2 || grep '^seed ' || true; }
+        [[ $rc -eq 0 ]] && break
+        [[ $rc -eq 3 && $tries -gt 1 ]] && continue
+        grep -h 'mrcli\|Error' "$work/log" >&2 || true
+        die "generation failed"
+    done
+    [[ $rc -eq 0 ]] || die "no usable seed in $tries attempts"
+    [[ -f $work/out/$name.nes ]] || die "generation failed"
+    local dest; mkdir -p "$out"; dest=$(cd "$out" && pwd)/$seed
+    [[ -e $dest ]] && die "$dest already exists"
+    mkdir -p "$dest" && cp -r "$work/out/." "$dest/"
+    echo "$dest/$name.nes"
+}
+
+case ${1:-} in
+    setup)   shift; cmd_setup "$@" ;;
+    options) shift; cmd_options ;;
+    gen)     shift; cmd_gen "$@" ;;
+    -h|--help|help|"") usage ;;
+    *) usage >&2; exit 2 ;;
+esac
