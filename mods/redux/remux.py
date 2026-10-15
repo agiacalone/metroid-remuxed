@@ -138,6 +138,13 @@ def build_sources(work, redux, seed):
         (r"\nwarnpc \$9A56", ""),
     ], "Map_RAM.asm"))
 
+    # The corner map reads the cells around Samus without an edge check: in
+    # column 0 or row 0 the address wraps into another row, and all nine cells
+    # come from the wrong place. Vanilla Zebes never uses the edges; generated
+    # worlds do. This version reads each cell through GetMapTile, which the
+    # pause map already uses and which returns the blank tile off the map.
+    (work / "MinimapPos.asm").write_text(MINIMAP)
+
     glue = f"""
 ; Loader, bank 14. Called with bank 14 mapped, from MapGlue.
 %org($9A00,14)
@@ -222,6 +229,66 @@ assert pc() <= $FFE9, "glue runs into the METROID string"
         "",
     ]))
     return tilemap
+
+
+MINIMAP = """
+; Corner map: 3x3 cells around Samus, drawn as sprites at the top right.
+; Replaces Redux's MinimapPos.asm (see build_sources). Same screen layout,
+; same blinking centre cell; cells come from GetMapTile, which checks the
+; map's edges. GetMapTile works on a 7x7 window centred on (MinimapX,
+; MinimapY), so window positions 2-4 are the cells around Samus.
+MinimapPos:
+	jsr GetMapCords		; MinimapX/Y = Samus's cell
+	ldx SpritePagePos
+	lda #$1F		; screen Y of the top row
+	sta $00
+	lda #$02		; window row
+	sta $01
+.row:
+	lda #$D8		; screen X of the left column
+	sta $02
+	ldy #$02		; window column
+.col:
+	stx $07			; GetMapTile takes the column in X
+	tya
+	tax
+	lda $01
+	jsr GetMapTile		; A = tile; keeps Y
+	ldx $07
+	sta OAM_Tile,x
+	lda $00
+	sta OAM_Y,x
+	lda #$01
+	sta OAM_Att,x
+	lda $02
+	sta OAM_X,x
+	clc
+	adc #$08
+	sta $02
+	inx
+	inx
+	inx
+	inx
+	iny
+	cpy #$05
+	bne .col
+	lda $00
+	clc
+	adc #$08
+	sta $00
+	inc $01
+	lda $01
+	cmp #$05
+	bne .row
+	lda FrameCount		; blink the centre cell in Samus's palette
+	and #$08
+	bne +
+	ldy SpritePagePos
+	lda #$00
+	sta $0212,y
++	stx SpritePagePos
+	jmp DisplayBar
+"""
 
 
 # Bytes the build may change although Metrandomizer changed them too.

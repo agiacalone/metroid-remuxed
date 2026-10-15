@@ -45,6 +45,7 @@ Source edits, each required to match exactly once:
 | `Map_ROM.asm` | copy 6 pages, not 7; `rts` instead of jumping to bank 0 | stay inside the measured free RAM; return to the loader |
 | `Map_RAM.asm` | the input handler ends with the seed's own pause check | see below |
 | `Map_RAM.asm` | off-map cells use `$BE`, not `$FF` | `$FF` is enemy graphics in vanilla |
+| `MinimapPos.asm` | replaced: reads each cell through `GetMapTile` | Redux's corner map has no edge check, so in column 0 or row 0 it read nine cells from the wrong row. Vanilla Zebes never uses the edges; generated worlds do |
 | `Map_RAM.asm` | drop `warnpc` | the pinned Asar has no `warnpc`; `main.asm` checks the end instead |
 | `saving.asm` declarations | drop `Reset` | the pinned Asar rejects it as a name; the map code does not use it |
 
