@@ -18,7 +18,7 @@ What the build does:
      generates a new world, so Redux's hand-drawn vanilla map would be wrong.
      Assembles Redux's MapData.asm, Map_ROM.asm, Map_RAM.asm and MinimapPos.asm,
      with the map in bank 14 and the code that runs from battery RAM at
-     $7D00-$7EFF.
+     $7D00-$7FFF.
   3. Adds a loader. Vanilla Metroid builds its graphics in CHR-RAM, one area at
      a time, so the map's sprite tiles ($9A-$9F, $AA-$BF: no area loads those)
      are written by the loader, not by a CHR-ROM bank as in Redux. The loader
@@ -91,7 +91,7 @@ def pause_check(seed):
     return b[1], b[3]
 
 
-def build_sources(work, redux, seed):
+def build_sources(work, redux, seed, fog=True):
     src = pathlib.Path(redux) / "code"
     saving = (src / "gameplay/saving.asm").read_text()
     m = re.search(r"; Existing vars.*?\nMapData\s*=[^\n]*\n", saving, flags=re.S)
@@ -124,8 +124,6 @@ def build_sources(work, redux, seed):
         (r'incbin "MapTilemap\.bin"', 'incbin "MapTilemap-remux.bin"'),
     ], "MapData.asm"))
     (work / "Map_ROM.asm").write_text(edit((work / "Map_ROM.asm").read_text(), [
-        # Copy six pages ($7900-$7EFF, the measured free range), not Redux's seven.
-        (r"ldx #\$07", "ldx #$06"),
         # Return to the loader instead of jumping to bank 0's file code.
         (r"ldy #\$00\s*\n\s*jmp ROMSwitch", "rts"),
     ], "Map_ROM.asm"))
@@ -137,26 +135,38 @@ def build_sources(work, redux, seed):
         # Newer Asar has no warnpc; the end of this code is checked in main.asm.
         (r"\nwarnpc \$9A56", ""),
     ], "Map_RAM.asm"))
+    if fog:
+        # Unvisited cells read as blank; visited ones lose the mark.
+        (work / "Map_RAM.asm").write_text(edit((work / "Map_RAM.asm").read_text(), [
+            (r"lda \(\$04\),y[^\n]*",
+             "lda ($04),y\n\tand #$40\n\tbeq FogHidden\n\tlda ($04),y\n\tand #$BF\n\tjmp FogShown\n"
+             f"FogHidden:\n\tlda #${BLANK:02X}\nFogShown:"),
+        ], "Map_RAM.asm (fog)"))
 
     # The corner map reads the cells around Samus without an edge check: in
     # column 0 or row 0 the address wraps into another row, and all nine cells
     # come from the wrong place. Vanilla Zebes never uses the edges; generated
     # worlds do. This version reads each cell through GetMapTile, which the
     # pause map already uses and which returns the blank tile off the map.
-    (work / "MinimapPos.asm").write_text(MINIMAP)
+    (work / "MinimapPos.asm").write_text(
+        MINIMAP.replace("{mark}", "\tjsr MarkVisited\n" if fog else "") + (MARK if fog else ""))
 
     glue = f"""
-; Loader, bank 14. Called with bank 14 mapped, from MapGlue.
-%org($9A00,14)
+; Loader, bank 14. Called with bank 14 mapped, from MapGlue. It sits after the
+; seven pages MapLoadEntryPoint copies ($9400-$9AFF -> $7900-$7FFF); main.asm
+; asserts the RAM code ends by $7FFF, so the two cannot overlap.
+%org($9B00,14)
 MapLoad:
 	lda MapRAM+${CHECKS[0]:03X}
+	and #$BF		; ignore the fog-of-war mark
 	cmp #${tilemap[CHECKS[0]]:02X}
 	bne .load
 	lda MapRAM+${CHECKS[1]:03X}
+	and #$BF
 	cmp #${tilemap[CHECKS[1]]:02X}
 	beq .done
 .load:
-	jsr MapLoadEntryPoint	; map and RAM code -> $7900-$7EFF
+	jsr MapLoadEntryPoint	; map and RAM code -> $7900-$7FFF
 	bit $2002
 	lda #$09		; sprite tiles $9A-$9F
 	sta $2006
@@ -224,7 +234,7 @@ assert pc() <= $FFE9, "glue runs into the METROID string"
         'incsrc "MinimapPos.asm"',
         "MapRamEnd:",
         "base off",
-        'assert MapRamEnd <= $7F00, "map RAM code runs past $7EFF"',
+        'assert MapRamEnd <= $8000, "map RAM code runs past $7FFF"',
         'incsrc "glue.asm"',
         "",
     ]))
@@ -239,7 +249,7 @@ MINIMAP = """
 ; MinimapY), so window positions 2-4 are the cells around Samus.
 MinimapPos:
 	jsr GetMapCords		; MinimapX/Y = Samus's cell
-	ldx SpritePagePos
+{mark}	ldx SpritePagePos
 	lda #$1F		; screen Y of the top row
 	sta $00
 	lda #$02		; window row
@@ -290,6 +300,69 @@ MinimapPos:
 	jmp DisplayBar
 """
 
+# Fog of war: a cell shows once Samus has been in it. The visited mark is bit 6
+# of the cell's byte in the RAM map; every tile the map uses ($9A-$BF) has bit 6
+# clear. GetMapTile shows unmarked cells as blank, so the corner and pause maps
+# both hide them. The marks last until power-off: vanilla has no save files.
+FOG_VISITED = 0x40
+MARK = """
+; Mark Samus's cell visited, and an elevator connector above or below it.
+MarkVisited:
+	lda MinimapRAM.MinimapX
+	cmp #$20
+	bcs .done
+	lda MinimapRAM.MinimapY
+	cmp #$20
+	bcs .done
+	lsr			; pointer = MapRAM + Y*32 + X
+	lsr
+	lsr
+	clc
+	adc.b #MapRAM>>8
+	sta $01
+	lda MinimapRAM.MinimapY
+	asl
+	asl
+	asl
+	asl
+	asl
+	ora MinimapRAM.MinimapX
+	sta $00
+	ldy #$00
+	lda ($00),y
+	ora #$40
+	sta ($00),y
+	lda MinimapRAM.MinimapY
+	cmp #$1F		; a row below?
+	bcs +
+	ldy #$20
+	lda ($00),y
+	and #$BF
+	cmp #$B9		; elevator connector
+	bne +
+	lda ($00),y
+	ora #$40
+	sta ($00),y
++	lda MinimapRAM.MinimapY
+	beq .done		; a row above?
+	lda $00
+	sec
+	sbc #$20
+	sta $00
+	bcs +
+	dec $01
++	ldy #$00
+	lda ($00),y
+	and #$BF
+	cmp #$B9
+	bne .done
+	lda ($00),y
+	ora #$40
+	sta ($00),y
+.done:
+	rts
+"""
+
 
 # Bytes the build may change although Metrandomizer changed them too.
 ALLOWED_OVERWRITES = {
@@ -323,14 +396,14 @@ def check(original, seed, built):
     return changed, new
 
 
-def remux(redux, asar, original_path, seed_path, out_path):
+def remux(redux, asar, original_path, seed_path, out_path, fog=True):
     original = pathlib.Path(original_path).read_bytes()
     if hashlib.sha1(original[HEADER:]).hexdigest() != ROM_SHA1:
         raise RemuxError("ORIGINAL is not an unmodified Metroid (USA) ROM")
     seed = pathlib.Path(seed_path).read_bytes()
     with tempfile.TemporaryDirectory(prefix="mremux-") as tmp:
         work = pathlib.Path(tmp)
-        build_sources(work, redux, seed)
+        build_sources(work, redux, seed, fog)
         rom = work / "out.nes"
         rom.write_bytes(expand(seed))
         r = subprocess.run([asar, "--no-title-check", "--fix-checksum=off", "main.asm", "out.nes"],
@@ -347,12 +420,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--redux", required=True, help="Metroid Redux checkout")
     ap.add_argument("--asar", required=True, help="Asar binary")
+    ap.add_argument("--no-fog", action="store_true", help="show the whole map from the start")
     ap.add_argument("original")
     ap.add_argument("seed")
     ap.add_argument("out")
     a = ap.parse_args()
     try:
-        changed, new = remux(a.redux, a.asar, a.original, a.seed, a.out)
+        changed, new = remux(a.redux, a.asar, a.original, a.seed, a.out, fog=not a.no_fog)
     except RemuxError as e:
         sys.exit(f"remux: {e}")
     print(f"{pathlib.Path(a.out).name}: map added; {changed} bytes changed in the original banks, {new} in the new ones")

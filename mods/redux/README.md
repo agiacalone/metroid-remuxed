@@ -14,7 +14,7 @@ Check out Metroid Redux at `REDUX_COMMIT` and build Asar at `ASAR_COMMIT` (see `
 - A corner map in the HUD: the rooms around Samus, with a blinking blip.
 - When paused, a 7x7-room window of the map. The D-pad scrolls it across Zebes.
 
-The map shows the whole world from the start; it does not reveal rooms as you explore. It marks no items.
+**Fog of war** (default): a room shows on the map once Samus has been in it, and an elevator connector once she has stood next to it. Use `--no-fog` to show the whole world from the start. The explored map lasts until power-off, deaths included; vanilla Metroid has no save files to keep it in. The map marks no items.
 
 ## The map is drawn for each seed
 
@@ -34,15 +34,15 @@ Cells with an item or elevator also seed the walk, so no such room is left off t
 Redux only patches the original ROM, so `remux.py` assembles Redux's own map source onto each seed:
 
 1. **Expand.** The 128 KB seed becomes 256 KB of PRG. Banks 0-6 stay put, the fixed bank moves from bank 7 to bank 15, and banks 7-14 are new space. `ROMSwitch` stops merging the bank number into `$28` (`$C4F8`), as Redux does, so banks 8 and up can be selected.
-2. **Assemble** Redux's `MapData.asm`, `Map_ROM.asm`, `Map_RAM.asm` and `MinimapPos.asm`. The map (1 KB) is in bank 14 at `$9400`. The code that runs from battery RAM is at `$9800`, copied to `$7D00-$7EFF`.
-3. **Load.** Redux loads its map when a save file loads, and draws it with tiles from its CHR-ROM. A seed has no save files, and vanilla Metroid builds its graphics in CHR-RAM. So a loader (bank 14 `$9A00`) runs at the end of every graphics load (`LoadGFX`, `$C7D0`) through 13 bytes of glue at `$FFDB`. It does its work only when the map is missing from RAM: it copies the map and code to `$7900-$7EFF` and writes the map's sprite tiles.
+2. **Assemble** Redux's `MapData.asm`, `Map_ROM.asm`, `Map_RAM.asm` and `MinimapPos.asm`. The map (1 KB) is in bank 14 at `$9400`. The code that runs from battery RAM is at `$9800`, copied to `$7D00-$7FFF`.
+3. **Load.** Redux loads its map when a save file loads, and draws it with tiles from its CHR-ROM. A seed has no save files, and vanilla Metroid builds its graphics in CHR-RAM. So a loader (bank 14 `$9B00`) runs at the end of every graphics load (`LoadGFX`, `$C7D0`) through 13 bytes of glue at `$FFDB`. It does its work only when the map is missing from RAM: it copies the map and code to `$7900-$7FFF` and writes the map's sprite tiles.
 
 Source edits, each required to match exactly once:
 
 | File | Edit | Why |
 |---|---|---|
 | `MapData.asm` | include the generated tilemap | the seed's own world; empty cells use the free tile `$BE`, because Redux's `$FE` is enemy graphics in vanilla |
-| `Map_ROM.asm` | copy 6 pages, not 7; `rts` instead of jumping to bank 0 | stay inside the measured free RAM; return to the loader |
+| `Map_ROM.asm` | `rts` instead of jumping to bank 0 | return to the loader |
 | `Map_RAM.asm` | the input handler ends with the seed's own pause check | see below |
 | `Map_RAM.asm` | off-map cells use `$BE`, not `$FF` | `$FF` is enemy graphics in vanilla |
 | `MinimapPos.asm` | replaced: reads each cell through `GetMapTile` | Redux's corner map has no edge check, so in column 0 or row 0 it read nine cells from the wrong row. Vanilla Zebes never uses the edges; generated worlds do |
@@ -52,8 +52,14 @@ Source edits, each required to match exactly once:
 ### Measured, not assumed
 
 - **Sprite tiles.** No graphics group loads sprite tiles `$9A-$9F` or `$AA-$BF` (Metroid's table at `$C6E0`). `$A0-$A9` hold the HUD digits, and the map does not use them. The tiles come from Redux's `code/gfx/gfx03.bin`.
-- **Battery RAM.** Vanilla and a seed both zero `$7900-$7AFF` and `$7B71-$7BFF` once at power-on, and never touch `$7900-$7EFF` in play or pause. The loader checks two map bytes in that range, so it reloads after any clear.
+- **Battery RAM.** Vanilla and a seed both zero `$7900-$7AFF` and `$7B71-$7BFF` once at power-on, and never touch `$7900-$7FFF` in play or pause. No instruction in either addresses `$7F00-$7FFF`. The loader checks two map bytes in that range, so it reloads after any clear.
 - **Fixed bank.** `$FFDB-$FFE8` is the only free run of 13 bytes or more that vanilla and all five test seeds leave alone.
+
+## Fog of war
+
+The visited mark is bit 6 of each cell's byte in the RAM map: every map tile (`$9A-$BF`) has it clear. `MarkVisited`, called from the corner map every frame in play, sets it on Samus's cell and on an elevator connector directly above or below. `GetMapTile` returns the blank tile for an unmarked cell, so the corner and pause maps both hide unexplored rooms. The loader's check masks the bit, or a visit to one of its two check cells would look like a cleared map and reload it.
+
+The fog code needs Redux's seventh page of RAM code (`$7F00-$7FFF`), which the measurements show is unused by vanilla and the seeds. The loader therefore sits at bank 14 `$9B00`, after the seven pages it copies.
 
 ## The safety check
 
