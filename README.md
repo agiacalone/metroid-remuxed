@@ -100,6 +100,23 @@ flowchart LR
 The explored map lasts until power-off, deaths included. Metroid has no save files, so
 nothing keeps it after power-off. An emulator save state does keep it.
 
+## Fog of war for Metroid + Saving hacks
+
+`mods/linear/fog.py` adds the same fog of war to a hack built on Metroid + Saving 0.5.2,
+such as *Metroid - Linear*. Those hacks keep their own map and save files, so the explored
+map is kept **per save file**: each file has a 128-byte bitmap in battery RAM (`$7600`,
+`$7680`, `$7700`), applied when the file loads and cleared when a new game starts in an
+empty slot.
+
+```sh
+python3 mods/linear/fog.py --asar ~/.local/share/metrandomizer/asar/asar \
+    "Metroid - Linear.nes" "Metroid - Linear (Fog of War).nes"     # or --session-fog
+```
+
+It checks every patch site against Metroid + Saving's bytes first and refuses any other ROM.
+`--session-fog` keeps the explored map in RAM only, as on the randomized seeds. The script's
+header documents each hook and the free space it uses.
+
 ## Commands
 
 | Command | What it does |
