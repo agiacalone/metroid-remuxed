@@ -1,6 +1,8 @@
-# metrandomizer-cli
+# Metroid Remuxed
 
-A command-line wrapper for **Metrandomizer** v07b, the NES Metroid randomizer by
+A randomized Zebes every game, with a map that is drawn for each seed and fills in as you explore. Metroid Remuxed runs the **Metrandomizer** randomizer headless and adds the map from Metroid + Saving, as carried by Metroid Redux (see [mods/redux/README.md](mods/redux/README.md)).
+
+It started as a command-line wrapper for **Metrandomizer** v07b, the NES Metroid randomizer by
 Hex4F ([romhacking.net](https://www.romhacking.net/utilities/1437/)). Metrandomizer
 builds a new Zebes for every seed: it rearranges the layout of Brinstar, Norfair,
 Kraid's lair, Ridley's lair and part of Tourian, and shuffles every item. It is a

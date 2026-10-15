@@ -1,6 +1,6 @@
 # Metroid Remuxed: internals
 
-Metroid Remuxed puts the map from [Metroid + Saving](https://www.romhacking.net/hacks/4471/) (snarfblam), as carried by [Metroid Redux](https://github.com/ShadowOne333/Metroid-Redux) (ShadowOne333, GPL-3), onto Metrandomizer seeds. Version 0.1 adds the map only.
+Metroid Remuxed puts the map from [Metroid + Saving](https://www.romhacking.net/hacks/4471/) (snarfblam), as carried by [Metroid Redux](https://github.com/ShadowOne333/Metroid-Redux) (ShadowOne333, GPL-3), onto Metrandomizer seeds: a map drawn for each seed's own world, with fog of war.
 
 ```sh
 metroid-rando setup-redux                                    # once
