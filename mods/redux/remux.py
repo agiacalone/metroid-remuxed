@@ -14,7 +14,9 @@ from it. DIR is a Metroid Redux checkout (see PINS); PATH an Asar binary.
 What the build does:
   1. Expands the seed from 128 KB to 256 KB of PRG. Banks 0-6 stay put, the
      fixed bank moves from bank 7 to bank 15, and banks 7-14 are new space.
-  2. Assembles Redux's MapData.asm, Map_ROM.asm, Map_RAM.asm and MinimapPos.asm,
+  2. Draws this seed's map with Redux's tiles (tools/zebes.py): Metrandomizer
+     generates a new world, so Redux's hand-drawn vanilla map would be wrong.
+     Assembles Redux's MapData.asm, Map_ROM.asm, Map_RAM.asm and MinimapPos.asm,
      with the map in bank 14 and the code that runs from battery RAM at
      $7D00-$7EFF.
   3. Adds a loader. Vanilla Metroid builds its graphics in CHR-RAM, one area at
@@ -35,6 +37,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
+import zebes  # noqa: E402
 
 HEADER = 0x10
 BANK = 0x4000
@@ -98,13 +103,15 @@ def build_sources(work, redux, seed):
     for f in MAP_FILES:
         shutil.copy(src / "gameplay/saving" / f, work / f)
 
-    tilemap = bytearray((src / "gameplay/saving/MapTilemap.bin").read_bytes())
-    used = set(tilemap)
-    if BLANK in used or len(tilemap) != 0x400:
-        raise RemuxError("MapTilemap.bin changed shape; check the tile choice")
-    # Redux draws empty cells with tile $FE, which in vanilla belongs to each
-    # area's enemy graphics. Use a free tile in the map's own range instead.
-    tilemap = bytearray(BLANK if t == 0xFE else t for t in tilemap)
+    # Metrandomizer generates a new world, so Redux's hand-drawn map of vanilla
+    # Zebes (MapTilemap.bin) would be wrong. Draw this seed's world with the
+    # same tiles instead (tools/zebes.py).
+    tilemap = zebes.tilemap(seed)
+    if BLANK in set(tilemap):
+        raise RemuxError("the generated map uses the blank tile; check the tile choice")
+    # Empty cells: Redux's tile $FE is enemy graphics in vanilla. Use a free
+    # tile in the map's own range instead.
+    tilemap = bytearray(BLANK if t == zebes.EMPTY else t for t in tilemap)
     (work / "MapTilemap-remux.bin").write_bytes(tilemap)
 
     gfx = (src / "gfx/gfx03.bin").read_bytes()

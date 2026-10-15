@@ -14,7 +14,20 @@ Check out Metroid Redux at `REDUX_COMMIT` and build Asar at `ASAR_COMMIT` (see `
 - A corner map in the HUD: the rooms around Samus, with a blinking blip.
 - When paused, a 7x7-room window of the map. The D-pad scrolls it across Zebes.
 
-The map shows all of Zebes from the start; it does not reveal rooms as you explore. It marks no items: only four fixed rooms carry a dot, including Kraid's and Ridley's. Metrandomizer moves items, not rooms or bosses, so the map is accurate on every seed.
+The map shows the whole world from the start; it does not reveal rooms as you explore. It marks no items.
+
+## The map is drawn for each seed
+
+Metrandomizer generates a new world for every seed: seed 01 changes 597 of the 1,024 cells of the world map (bank 0 `$A53E`). Redux's map is a hand-drawn picture of vanilla Zebes, so `tools/zebes.py` draws each seed's world with Redux's tiles instead:
+
+1. **Walk the world as the game scrolls it.** Each area grows from its start cell (`$95D7` in its bank). In a horizontal stretch, Samus scrolls left and right until a door; in a vertical shaft, up and down. Passing a door switches direction, except at the door pairs marked in the special-object table (type 9). Elevators end their area's shaft.
+2. **Read doors from the room data**, after each room's objects: entries of type 2, `$Ax` on the right and `$Bx` on the left. A door can be recorded in either of the two rooms.
+3. **Drop filler rooms.** The grid puts a room past many shaft ends so the scroll engine has something to load. A shaft dead end with no doors and nothing in it is dropped.
+4. **Pick each cell's tile** from how it scrolls and where its doors are: shaft top, middle or bottom; corridor end or middle; or a single room. Each comes in no-door, left, right and both-door versions. Elevators get the dotted tile between the two areas.
+
+Cells with an item or elevator also seed the walk, so no such room is left off the map.
+
+**Checked against vanilla:** the generated vanilla map has the same corridors, shafts and junctions as Redux's hand-drawn one, and 70% of tiles are identical. Most differences are deliberate. Redux draws some chains of door-separated rooms (Norfair) as one corridor, while the generator draws the doors, as the game has them.
 
 ## How it is built
 
@@ -28,7 +41,7 @@ Source edits, each required to match exactly once:
 
 | File | Edit | Why |
 |---|---|---|
-| `MapData.asm` | include a remapped tilemap | empty cells used tile `$FE`, which is enemy graphics in vanilla; they use the free tile `$BE` |
+| `MapData.asm` | include the generated tilemap | the seed's own world; empty cells use the free tile `$BE`, because Redux's `$FE` is enemy graphics in vanilla |
 | `Map_ROM.asm` | copy 6 pages, not 7; `rts` instead of jumping to bank 0 | stay inside the measured free RAM; return to the loader |
 | `Map_RAM.asm` | the input handler ends with the seed's own pause check | see below |
 | `Map_RAM.asm` | off-map cells use `$BE`, not `$FF` | `$FF` is enemy graphics in vanilla |
@@ -49,5 +62,7 @@ On the five 2026-10-14 seeds the build changes 36 bytes in the original banks an
 
 ## Known limits
 
+- **Shafts can be drawn a cell or two too tall.** Where the grid continues past a ceiling that Samus cannot pass, the generator cannot tell without reading each room's collision data. No room is hidden by this.
+- **No landmark dots.** Redux marks Kraid's and Ridley's rooms with a dot; the generated map does not mark bosses.
 - **Sprite flicker near the HUD.** The minimap adds three sprites on each HUD row, which fills the NES's 8 sprites per line. With an enemy near the top of the screen, HUD letters can flicker. Vanilla Metroid flickers the same way under load.
-- **Tested** in FCEUX on the five preset seeds: boot, play, doors, pause and map scrolling, in four different start areas. Not yet played on hardware.
+- **Tested** in FCEUX on the five preset seeds: boot, play, doors, pause and map scrolling, in four start areas; in 700 samples the minimap never centred on an empty cell. The Steam Deck play test is in progress.
