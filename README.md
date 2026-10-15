@@ -48,6 +48,9 @@ metroid-rando options                          # every setting and its allowed v
 export MR_ROM="/path/to/Metroid (USA).nes"
 metroid-rando gen --preset 03-lost-expedition --out out
 metroid-rando gen --settings out/4219082488/settings.json --seed 4219082488   # reproduce a seed
+
+metroid-rando setup-redux                      # once, for --mod redux
+metroid-rando gen --preset 01-return-to-zebes --mod redux   # Metroid Remuxed: with the map
 ```
 
 | `gen` option | Meaning |
@@ -58,6 +61,7 @@ metroid-rando gen --settings out/4219082488/settings.json --seed 4219082488   # 
 | `--out DIR` | Output directory, default `./out`. Each seed gets its own folder. |
 | `--name NAME` | ROM file name, without `.nes` |
 | `--rom FILE` | The base ROM. Or set `MR_ROM`. |
+| `--mod redux[:no-fog]` | Metroid Remuxed: add the Metroid + Saving map, drawn for this seed, with fog of war unless `:no-fog`. Needs `setup-redux`, `git`, `cmake`, a C++ compiler and `python3`. |
 | `-v` | Show each attempt |
 
 Each seed folder holds the ROM, `settings.json`, `seedinfo.txt` (version, seed and

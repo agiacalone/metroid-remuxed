@@ -34,6 +34,8 @@ usage: metroid-rando COMMAND [ARGS]
   setup ZIP                 verify "$ZIP_NAME" (downloaded by hand from
                             romhacking.net/utilities/1437) and unpack it
   options                   list every setting and its allowed values
+  setup-redux               fetch Metroid Redux and Asar at the pinned commits
+                            (for --mod redux)
   gen [OPTIONS]             generate one seed
 
 gen options:
@@ -43,6 +45,9 @@ gen options:
   --out DIR                 output directory (default: ./out); the seed gets its own folder
   --name NAME               ROM file name without .nes (default: metroid-SEED)
   --rom FILE                unmodified "Metroid (USA).nes" (or set MR_ROM)
+  --mod redux[:no-fog]      add the Metroid + Saving map from Metroid Redux, drawn
+                            for this seed (Metroid Remuxed); fog of war unless
+                            :no-fog. Needs setup-redux and python3
   -v                        show the container command
 
 environment: MR_HOME (default ~/.local/share/metrandomizer), MR_ROM
@@ -86,6 +91,33 @@ cmd_setup() {
     echo "metroid-rando: Metrandomizer $VERSION unpacked to $VENDOR"
 }
 
+REDUX_DIR=$MR_HOME/redux
+ASAR=$MR_HOME/asar/asar
+
+cmd_setup_redux() {
+    # shellcheck source=/dev/null
+    . "$REPO/mods/redux/PINS"
+    for t in git cmake c++ curl; do command -v "$t" >/dev/null || die "$t is required for setup-redux"; done
+    if [[ ! -d $REDUX_DIR/.git ]]; then
+        git clone -q "$REDUX_REPO" "$REDUX_DIR"
+    fi
+    git -C "$REDUX_DIR" fetch -q origin
+    git -C "$REDUX_DIR" checkout -q "$REDUX_COMMIT"
+
+    local tmp; tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' RETURN
+    curl -fsSL -o "$tmp/asar.tar.gz" "$ASAR_REPO/archive/$ASAR_COMMIT.tar.gz"
+    echo "$ASAR_SHA256  $tmp/asar.tar.gz" | sha256sum -c --quiet || die "Asar source checksum mismatch"
+    tar -C "$tmp" -xzf "$tmp/asar.tar.gz"
+    cmake -S "$tmp/asar-$ASAR_COMMIT/src" -B "$tmp/build" -DCMAKE_BUILD_TYPE=Release \
+        -DASAR_GEN_DLL=OFF -DASAR_GEN_LIB=OFF -DASAR_GEN_EXE_TEST=OFF -DASAR_GEN_DLL_TEST=OFF >/dev/null
+    cmake --build "$tmp/build" -j "$(nproc)" >/dev/null
+    mkdir -p "$(dirname "$ASAR")"
+    cp "$tmp/build/asar/bin/asar" "$ASAR"
+    echo "$ASAR_COMMIT" > "$(dirname "$ASAR")/COMMIT"
+    echo "metroid-rando: Metroid Redux $(git -C "$REDUX_DIR" rev-parse --short HEAD) and Asar ${ASAR_COMMIT:0:7} ready in $MR_HOME"
+}
+
 check_vendor() { [[ -f $VENDOR/VERSION ]] || die "not set up; run: metroid-rando setup \"$ZIP_NAME\""; }
 
 cmd_options() {
@@ -109,7 +141,7 @@ check_rom() {
 
 cmd_gen() {
     check_vendor
-    local settings="" seed="" out=out name="" rom=$MR_ROM verbose=0
+    local settings="" seed="" out=out name="" rom=$MR_ROM verbose=0 mod=""
     while (($#)); do
         case $1 in
             --preset)   settings=$REPO/presets/$2.json; [[ -f $settings ]] || die "no preset: $2"; shift 2 ;;
@@ -118,12 +150,23 @@ cmd_gen() {
             --out)      out=$2; shift 2 ;;
             --name)     name=$2; shift 2 ;;
             --rom)      rom=$2; shift 2 ;;
+            --mod)      mod=$2; shift 2 ;;
             -v)         verbose=1; shift ;;
             *)          usage >&2; exit 2 ;;
         esac
     done
     [[ -n $settings && -f $settings ]] || die "need --preset or --settings"
     check_rom "$rom"
+    local remux=()
+    if [[ -n $mod ]]; then
+        case $mod in
+            redux)        ;;
+            redux:no-fog) remux=(--no-fog) ;;
+            *)            die "unknown mod: $mod (redux or redux:no-fog)" ;;
+        esac
+        [[ -x $ASAR && -d $REDUX_DIR/.git ]] || die "Metroid Redux is not set up; run: metroid-rando setup-redux"
+        command -v python3 >/dev/null || die "python3 is required for --mod redux"
+    fi
     # Some seeds cannot fit the generated map ("Bad seed!"). A chosen seed fails
     # loudly; without --seed, retry with a new one, as the GUI user would.
     local tries=1; [[ -z $seed ]] && tries=20
@@ -149,6 +192,12 @@ cmd_gen() {
     done
     [[ $rc -eq 0 ]] || die "no usable seed in $tries attempts"
     [[ -f $work/out/$name.nes ]] || die "generation failed"
+    if [[ -n $mod ]]; then
+        # Metroid Remuxed: add the map, drawn for this seed, in place.
+        python3 "$REPO/mods/redux/remux.py" --redux "$REDUX_DIR" --asar "$ASAR" "${remux[@]}" \
+            "$rom" "$work/out/$name.nes" "$work/remuxed.nes" >&2 || die "remux failed"
+        mv "$work/remuxed.nes" "$work/out/$name.nes"
+    fi
     local dest; mkdir -p "$out"; dest=$(cd "$out" && pwd)/$seed
     [[ -e $dest ]] && die "$dest already exists"
     mkdir -p "$dest" && cp -r "$work/out/." "$dest/"
@@ -158,6 +207,7 @@ cmd_gen() {
 case ${1:-} in
     setup)   shift; cmd_setup "$@" ;;
     options) shift; cmd_options ;;
+    setup-redux) shift; cmd_setup_redux ;;
     gen)     shift; cmd_gen "$@" ;;
     -h|--help|help|"") usage ;;
     *) usage >&2; exit 2 ;;

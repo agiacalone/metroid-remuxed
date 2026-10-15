@@ -3,11 +3,16 @@
 Metroid Remuxed puts the map from [Metroid + Saving](https://www.romhacking.net/hacks/4471/) (snarfblam), as carried by [Metroid Redux](https://github.com/ShadowOne333/Metroid-Redux) (ShadowOne333, GPL-3), onto Metrandomizer seeds. Version 0.1 adds the map only.
 
 ```sh
-python3 mods/redux/remux.py --redux REDUX_CHECKOUT --asar ASAR \
-    "Metroid (USA).nes" SEED.nes OUT.nes
+metroid-rando setup-redux                                    # once
+metroid-rando gen --preset 01-return-to-zebes --mod redux    # or --mod redux:no-fog
 ```
 
-Check out Metroid Redux at `REDUX_COMMIT` and build Asar at `ASAR_COMMIT` (see `PINS`). Zelda Remuxed's `zelda-rando setup-redux` builds the same Asar.
+`setup-redux` checks out Metroid Redux at `REDUX_COMMIT` and builds Asar at `ASAR_COMMIT` (see `PINS`) into `$MR_HOME`. `gen --mod redux` runs `remux.py` on the new seed, so the ROM in the seed's folder is the Remuxed one. A preset and seed number reproduce the same ROM byte for byte. To add the map to an existing seed:
+
+```sh
+python3 mods/redux/remux.py --redux ~/.local/share/metrandomizer/redux \
+    --asar ~/.local/share/metrandomizer/asar/asar "Metroid (USA).nes" SEED.nes OUT.nes
+```
 
 ## What you get
 
