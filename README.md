@@ -114,7 +114,7 @@ python3 mods/linear/fog.py --asar ~/.local/share/metrandomizer/asar/asar \
 ```
 
 It checks every patch site against Metroid + Saving's bytes first and refuses any other ROM.
-`--session-fog` keeps the explored map in RAM only, as on the randomized seeds. The script's
+`--session-fog` keeps the explored map in RAM only, as on the randomized seeds. Played on a Steam Deck (RetroDECK, FCEUmm): 31 rooms explored, saved, and restored on loading the file. The script's
 header documents each hook and the free space it uses.
 
 ## Commands
