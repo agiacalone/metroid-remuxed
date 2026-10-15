@@ -14,7 +14,7 @@ Check out Metroid Redux at `REDUX_COMMIT` and build Asar at `ASAR_COMMIT` (see `
 - A corner map in the HUD: the rooms around Samus, with a blinking blip.
 - When paused, a 7x7-room window of the map. The D-pad scrolls it across Zebes.
 
-**Fog of war** (default): a room shows on the map once Samus has been in it, and an elevator connector once she has stood next to it. Use `--no-fog` to show the whole world from the start. The explored map lasts until power-off, deaths included; vanilla Metroid has no save files to keep it in. The map marks no items.
+**Fog of war** (default): a room shows on the map once Samus has been in it, and an elevator connector once she has stood next to it. Use `--no-fog` to show the whole world from the start. The explored map lasts until power-off, deaths included; vanilla Metroid has no save files to keep it in. An emulator save state does keep it, because it restores RAM: with auto states, exploration carries over between sessions. The map marks no items.
 
 ## The map is drawn for each seed
 
