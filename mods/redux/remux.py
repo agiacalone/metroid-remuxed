@@ -152,11 +152,16 @@ def build_sources(work, redux, seed, fog=True):
         MINIMAP.replace("{mark}", "\tjsr MarkVisited\n" if fog else "") + (MARK if fog else ""))
 
     glue = f"""
+MapBuildID = {{build_id}}
+
 ; Loader, bank 14. Called with bank 14 mapped, from MapGlue. It sits after the
 ; seven pages MapLoadEntryPoint copies ($9400-$9AFF -> $7900-$7FFF); main.asm
 ; asserts the RAM code ends by $7FFF, so the two cannot overlap.
 %org($9B00,14)
 MapLoad:
+	lda $7FFF		; build ID
+	cmp #{{build_id}}
+	bne .load
 	lda MapRAM+${CHECKS[0]:03X}
 	and #$BF		; ignore the fog-of-war mark
 	cmp #${tilemap[CHECKS[0]]:02X}
@@ -220,6 +225,13 @@ assert pc() <= $FFE9, "glue runs into the METROID string"
 	nop
 	nop
 """
+    # Build ID at the last byte of the RAM block ($7FFF): a save state made
+    # with another build restores that build's map code, which this ROM's hooks
+    # would jump into at the wrong addresses. The loader reloads when the ID
+    # differs, so such a state repairs itself at the next graphics load.
+    ram_src = "".join((work / f).read_text() for f in ("Map_RAM.asm", "MinimapPos.asm")) + bytes(tilemap).hex()
+    build_id = hashlib.sha1(ram_src.encode()).digest()[0] or 1
+    glue = glue.replace("{build_id}", f"${build_id:02X}")
     (work / "glue.asm").write_text(glue)
     (work / "main.asm").write_text("\n".join([
         "norom", "!headersize = $10", "optimize dp always", "dpbase 0",
@@ -234,7 +246,9 @@ assert pc() <= $FFE9, "glue runs into the METROID string"
         'incsrc "MinimapPos.asm"',
         "MapRamEnd:",
         "base off",
-        'assert MapRamEnd <= $8000, "map RAM code runs past $7FFF"',
+        "%org($9AFF,14)",
+        "\tdb MapBuildID",
+        'assert MapRamEnd <= $7FFF, "map RAM code runs into the build ID at $7FFF"',
         'incsrc "glue.asm"',
         "",
     ]))

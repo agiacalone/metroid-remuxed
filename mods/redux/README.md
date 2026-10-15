@@ -61,6 +61,10 @@ The visited mark is bit 6 of each cell's byte in the RAM map: every map tile (`$
 
 The fog code needs Redux's seventh page of RAM code (`$7F00-$7FFF`), which the measurements show is unused by vanilla and the seeds. The loader therefore sits at bank 14 `$9B00`, after the seven pages it copies.
 
+## Save states across builds
+
+A save state restores RAM, including the map code the loader copied there. A state made with an older build therefore brings back that build's map code, and this ROM's hooks jump into it at the wrong addresses (seen on the Deck as a tall column of map sprites). The last byte of the RAM block (`$7FFF`) holds a build ID derived from the map code and the map. The loader reloads when it differs, so such a state repairs itself at the next graphics load or reset. Until then it stays broken: use the emulator's Restart after updating a ROM.
+
 ## The safety check
 
 `remux.py` refuses to write the ROM if any byte it changes in banks 0-6 or the fixed bank is one Metrandomizer changed. The only exception is the pause-mode button check at `$C9B1`. Vanilla checks Up+A on controller 2 there; Metrandomizer checks A+B+Select+Start on controller 1. Redux's map hook replaces those bytes with a jump to its input handler, so the build ends the handler with the seed's own check, read from the seed.
