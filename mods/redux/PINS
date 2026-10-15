@@ -1,0 +1,8 @@
+# Sources Metroid Remuxed assembles from. Fetched at these commits, never committed.
+REDUX_REPO=https://github.com/ShadowOne333/Metroid-Redux
+REDUX_COMMIT=dd40ab7d65ecf96eddda9fbfc7acd25ecf0cd3a1
+# Same Asar pin as Zelda Remuxed (github.com/agiacalone/zelda-remuxed, mods/redux/PINS).
+ASAR_REPO=https://github.com/RPGHacker/asar
+ASAR_COMMIT=b8c26234f0fae893aab8ec842670244309a3ab2f
+# SHA-256 of https://github.com/RPGHacker/asar/archive/$ASAR_COMMIT.tar.gz
+ASAR_SHA256=75f97663e4c70638bceea53a2b529252d51bb2364a7ce96ca3350cee2426f156
